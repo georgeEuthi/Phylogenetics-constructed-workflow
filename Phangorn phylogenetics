@@ -1,0 +1,187 @@
+Phylogenetic analysis using Phangorn package (R studio)
+I use a fasta file containing eight DNA sequences from eight species of the plant pathogen oomycete species Phytophthora (P.infestans was responsible for the
+notorious Irish faminne back in the mid of 19th century due to the potato late blight).
+
+##############################################################################################################################################################
+
+# Phangorn tutorial (Schliep K. 2021)
+# Phangorn original paper: Schliep, Klaus Peter. "phangorn: phylogenetic analysis in R." Bioinformatics 27.4 (2011): 592-593.
+library(phangorn)
+library(ape)
+library(msa)
+library(Biostrings)
+
+
+
+# 1. Load the sequences and perform Multiple Sequence Alignment (MSA) in fasta format.
+# For this step one will need the 'msa' and 'Biostrings' packages.
+
+# Load the nucleotide sequences (.fasta). In case of protein sequences, Biostring package provides readAAStringSet()
+mySequences <- readDNAStringSet("your path/oomycetes_sequences.fasta")
+mySequences
+
+# Perform MSA on the loaded sequences using the msa package
+alignment <- msa(mySequences)
+print(alignment,show="complete")
+
+# Define an output path and save the MSA 
+output_alignment_file <- "your path/oomycetes_alignment.fasta"
+alignment_fasta <- as(alignment, "DNAStringSet")
+writeXStringSet(alignment_fasta, filepath = output_alignment_file)
+
+
+
+
+# 2. Load and convert the Aligned data of the fasta file (.phylip & .nexus also accepted) to create a phyDat Object.
+# From this point onwards,the phy-object, containing the the aligned sequences will be used for tree construction and
+# evolutionary analysis.
+
+oomycetes_file <- "your path/oomycetes_alignment.fasta"
+oomycetes <- read.phyDat(oomycetes_file, format = "fasta", type = "DNA")
+oomycetes
+
+
+# sometimes the names of the species contain various words. Sometimes, it is wise to change the names to ensure
+# better clarity. There are multiple ways to change the names of the created object. In my case, as I only need
+# the species name which is usually within square brackets, I will use regular expression (REGEX) for that.
+
+original_names <- names(oomycetes)
+print(original_names)
+
+# In case you need to change the names use REGEX and the gsub() function, and process the names at your names
+species_names <- gsub("", original_names)
+names(oomycetes) <- species_names
+print(names(oomycetes))
+
+
+# 3. Phylogenetic Trees Using Distance-Based Methods
+# After object development and in order to build a phylogenetic tree, distance based methods need to
+# be introduced, to transform the data to class DNAbin using the dist.ml(). This function calculates
+# pairwise distances between sequences using a Maximum Likelihood (ML) approach (Felsenstein 1981). 
+# ML-distance methods estimate the expected number of substitutions per site by incorporating models of 
+# sequence evolution (e.g., JC69, K80, etc.). Transformation to a distance matrix allows the tree-building 
+# algorithms to work with sequence relationships quantified by evolutionary distances.
+
+# Transform the phyDat object to a distance matrix using ML -based distances.
+dm <- dist.ml(oomycetes)
+
+# UPGMA tree(Unweighted Pair Group Method with Arithmetic Mean). UPGMA is a hierarchical clustering 
+# method that produces a rooted tree assuming a molecular clock (i.e., a constant rate of evolution 
+# across all lineages). It clusters taxa by minimizing their average pairwise distance.
+treeUPGMA  <- upgma(dm)
+plot(treeUPGMA, main="UPGMA")
+
+# Neighbor joining (NJ) method for an unrooted tree. NJ method does not assume a molecular clock and 
+# iteratively joins pairs of taxa or clusters that minimize the total branch length.
+treeNJ  <- NJ(dm)
+plot(treeNJ, "unrooted", main="NJ")
+
+
+# UPGMA method is simple and fast and can be very helpful to visualize evolutionary timelines, but since
+# it assumes constant rates of evolution based on the molecular clock method, sometimes may not reflect 
+# real-world data, leading to incorrect topologies. NJ, does not include constant rate of evolution, making
+# it suitable for datasets where substitution rates vary, but relies heavily on the accuracy of the distance 
+# matrix. Errors in the distance calculations can lead to sub-optimal trees.
+
+
+# 4. Bootstrap method to assess confidence in branch support
+# Bootstrapping is a statistical resampling method used to estimate the confidence or reliability of branches in a 
+# phylogenetic tree. During bootstrapping, new datasets are created by randomly resampling columns from the original 
+# dataset, allowing repetition. Each resampled dataset is analyzed to produce a tree, and the process is repeated 
+# many times (e.g., 100–1000 iterations). Values >85% are considered robust for a phylogenetic analysis.
+
+# Define a custom function for bootstrap analysis. This function  represents the workflow: Distance matrix → Tree
+# and takes a phylogenetic dataset as input to perform the following:
+# - Computes the pairwise distance matrix using Maximum Likelihood (`dist.ml()`).
+# - Constructs a UPGMA tree from the distance matrix.
+fun <- function(x) upgma(dist.ml(x))
+
+# Run bootstrap analysis on the dataset. The function bootstrap.phyDat() generates resampled datasets (by sampling 
+# with replacement) from the input data and applies the defined function (fun) to each dataset. The output contains 
+# the bootstrap values representing the frequency of occurrence of specific tree branches in the resampled datasets.
+bs_upgma <- bootstrap.phyDat(oomycetes, fun)
+
+# Plot the UPGMA tree with bootstrap support values added to the branches.
+plotBS( treeUPGMA, bs_upgma, main="UPGMA")
+
+
+# 5. Using Maximum Parsimony method
+# Maximum Parsimony (MP) infers evolutionary relationships by minimizing the total number of evolutionary changes 
+# (e.g., nucleotide substitutions) required to explain a given dataset. MP assumes the simplest explanation (minimum 
+# changes) is the most likely, favoring tree topologies that minimize homoplasy (convergent evolution or reversals).
+# But it can be sensitive to long-branch attraction (LBA) or struggle with large datasets or highly variable rates of
+# evolution, where likelihood-based methods (e.g., Maximum Likelihood, Bayesian) perform better.
+
+# Calculate the parsimony score i.e.the minimum number of changes required for the given tree to explain the data.
+# parsimony(), computes the number of evolutionary steps required to fit the dataset onto a specific tree.  .
+parsimony(tree = treeUPGMA, oomycetes)
+parsimony(tree = treeNJ, oomycetes)
+
+# Another way to compute the parsimony score is to implement the parsimony ratchet 
+# (Nixon K. 2005  https://doi.org/10.1111/j.1096-0031.1999.tb00277.x),a heuristic approach to find better 
+# parsimony scores by perturbing the dataset and performing iterative tree searches. The Ratchet avoids getting 
+# trapped in local optima during tree search, making it more likely to find the global minimum parsimony score
+treeRatchet <- pratchet(oomycetes, trace = 0,minit = 100)
+parsimony(treeRatchet, oomycetes)
+plotBS(midpoint(treeRatchet), type="phylogram")
+add.scale.bar()
+
+# Next, to optimize existing tress, methods like rearrangements can be implemented. 
+# Nearest-Neighbor Interchanges (NNI): Swaps adjacent branches to explore alternative topologies.
+# Subtree Pruning and Regrafting (SPR): Cuts a subtree and reattaches it in a different location to explore topologies.
+treeRA <- random.addition(oomycetes)
+treeSPR <- optim.parsimony(treeRA, oomycetes)
+
+# Calculate and compare the parsimony scores of the initial and optimized trees
+parsimony(c(treeRA, treeSPR), oomycetes)
+
+# Finally, for small datasets, it is also possible to find the most parsimonious trees using a branch and 
+# bound algorithm (Hendy and Penny 1982). It is suggested for data sets with less than 10 taxa,but one can
+# choose the number of taxa of the dataset e.g. here I chose 6.
+trees <- bab(oomycetes[1:6,])
+trees
+
+
+# 6. Model selection and Bootstrap analysis
+# Evolutionary models describe how nucleotide or amino acid substitutions occur over time. Selecting the 
+# best-fitting model improves the accuracy and reliability of tree reconstruction. By testing different models, 
+# one can identify the model best explaining the data, typically based on statistical criteria like AIC (Akaike 
+# Information Criterion) or BIC (Bayesian Information Criterion).The modelTest() function, can find the best fitting 
+# model, by comparing different nucleotide or protein models.
+mt <- modelTest(oomycetes, model=c("JC", "F81","SYM", "GTR"),control = pml.control(trace = 0))
+
+# Extract the best-fitting model and optimize it further. One can choose a specific model or select one based on
+# the BIC score
+fit <- as.pml(mt, "F81")
+fit <- as.pml(mt, "BIC")
+
+# Optimize the tree and parameters using the best model from modelTest().
+fit_mt <- pml_bb(mt, control = pml.control(trace = 0))
+fit_mt
+
+# Perform bootstrap analysis on the optimized tree and plot it.
+bs <- bootstrap.pml(fit_mt, bs=100, optNni=TRUE,control = pml.control(trace = 0))
+plotBS(midpoint(fit_mt$tree),p = .5,type="p",digits=2, main="F81 evolutionary model and Bootstrap method")
+
+# Assign and compare standard and transfer bootstrap values
+# Standard Bootstrap: Measures the proportion of replicates where each branch appears, providing traditional branch support.
+# Transfer Bootstrap: Averages branch support across subtrees, offering a more stable measure for poorly supported regions.
+tree_standard_bv <- plotBS(fit_mt$tree, bs, type = "n")
+tree_transfer_bv <- plotBS(fit_mt$tree, bs, type = "n", method = "TBE")
+
+# Create a consensus network from bootstrap replicates. This way one can highlight ambiguous relationships and conflicting 
+# phylogenetic signals.
+cnet <- consensusNet(bs, p=0.2)
+plot(cnet, show.edge.label=TRUE)
+
+
+# 7. Use the Molecular Clock process to identify the divergence times (Zuckerkandl & Pauling 1965).
+# pml_bb() function performs a ML estimation under the molecular clock assumption. The 'ultrameric' method
+# enforces an ultrametric tree where all lineages are constrained to have equal evolutionary time to the root, 
+# as required by the molecular clock. Divergence time in this dataset starts from 1 MyA to 0.2.
+fit_strict <- pml_bb(oomycetes, model="F81", method="ultrametric",rearrangement="NNI",control = pml.control(trace = 0))
+plot(fit_strict)
+
+
+# 8. Extracting the tree(s) at a Newick format
+write.tree(tree_standard_bv, "oomycetes.nwk")
