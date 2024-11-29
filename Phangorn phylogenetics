@@ -182,6 +182,13 @@ plot(cnet, show.edge.label=TRUE)
 fit_strict <- pml_bb(oomycetes, model="F81", method="ultrametric",rearrangement="NNI",control = pml.control(trace = 0))
 plot(fit_strict)
 
+# With the bootstrap values
+bs <- bootstrap.pml(fit_strict, bs = 100, optNni = TRUE, control = pml.control(trace = 0))
+plotBS(midpoint(fit_strict$tree), bs, main = "Molecular Clock Tree with Bootstrap Values")
 
-# 8. Extracting the tree(s) at a Newick format
+
+# 8. Extracting the tree(s) at a Newick format and save the plot
 write.tree(tree_standard_bv, "oomycetes.nwk")
+
+png("oomycetes_molecular_clock_plot.png", width = 10, height = 8, units = "in", res = 300)
+plotBS(midpoint(fit_strict$tree), bs, main = "Molecular Clock Tree with Bootstrap Values")
